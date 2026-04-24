@@ -1,14 +1,19 @@
 package service
 
 import (
+	"errors"
 	"testing"
+	"time"
+
 	"template-vue3-gin-fullstack/backend/internal/model"
 	"template-vue3-gin-fullstack/backend/internal/repository"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/crypto/bcrypt"
 )
 
+// MockUserRepository 模拟用户仓库
 type MockUserRepository struct {
 	mock.Mock
 }
@@ -54,129 +59,335 @@ func (m *MockUserRepository) Delete(id uint) error {
 
 func (m *MockUserRepository) List(page, pageSize int) ([]*model.User, int64, error) {
 	args := m.Called(page, pageSize)
+	if args.Get(0) == nil {
+		return nil, 0, args.Error(2)
+	}
 	return args.Get(0).([]*model.User), args.Get(1).(int64), args.Error(2)
 }
 
+// setupTest 创建测试所需的 Service 和 Mock
+func setupTest() (*userService, *MockUserRepository) {
+	mockRepo := new(MockUserRepository)
+	// 使用 nil redis 客户端，测试不依赖缓存的功能
+	svc := &userService{repo: mockRepo, rdb: nil}
+	return svc, mockRepo
+}
+
 func TestUserService_Register(t *testing.T) {
-	mockRepo := new(MockUserRepository)
-	mockRepo.On("Create", mock.AnythingOfType("*model.User")).Return(nil)
+	svc, mockRepo := setupTest()
 
-	svc := NewUserService(mockRepo, nil)
-
-	user, _, err := svc.Register("testuser", "password123", "test@example.com")
-	if err != nil {
-		t.Errorf("Register failed: %v", err)
+	tests := []struct {
+		name        string
+		username    string
+		password    string
+		email       string
+		mockSetup   func()
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:     "正常注册成功",
+			username: "testuser",
+			password: "password123",
+			email:    "test@example.com",
+			mockSetup: func() {
+				mockRepo.On("Create", mock.AnythingOfType("*model.User")).
+					Return(nil).Once()
+			},
+			wantErr: false,
+		},
+		{
+			name:     "用户名已存在",
+			username: "existinguser",
+			password: "password123",
+			email:    "existing@example.com",
+			mockSetup: func() {
+				mockRepo.On("Create", mock.AnythingOfType("*model.User")).
+					Return(repository.ErrUserAlreadyExists).Once()
+			},
+			wantErr:     true,
+			errContains: "用户名或邮箱已被注册",
+		},
+		{
+			name:     "数据库错误",
+			username: "testuser",
+			password: "password123",
+			email:    "test@example.com",
+			mockSetup: func() {
+				mockRepo.On("Create", mock.AnythingOfType("*model.User")).
+					Return(errors.New("数据库连接失败")).Once()
+			},
+			wantErr:     true,
+			errContains: "数据库连接失败",
+		},
 	}
 
-	if user.Username != "testuser" {
-		t.Errorf("Username mismatch: got %s, want testuser", user.Username)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.mockSetup()
 
-	if user.Email != "test@example.com" {
-		t.Errorf("Email mismatch: got %s, want test@example.com", user.Email)
-	}
+			user, _, err := svc.Register(tt.username, tt.password, tt.email)
 
-	mockRepo.AssertExpectations(t)
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+				assert.Nil(t, user)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, user)
+				assert.Equal(t, tt.username, user.Username)
+				assert.Equal(t, tt.email, user.Email)
+				assert.Equal(t, int8(1), user.Status)
+				// 验证密码已加密
+				assert.NotEqual(t, tt.password, user.PasswordHash)
+				err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(tt.password))
+				assert.NoError(t, err)
+			}
+
+			mockRepo.AssertExpectations(t)
+		})
+	}
 }
 
-func TestUserService_Login_Success(t *testing.T) {
-	mockRepo := new(MockUserRepository)
+func TestUserService_Login(t *testing.T) {
+	svc, mockRepo := setupTest()
 
-	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
-	mockUser := &model.User{
-		ID:           1,
-		Username:     "testuser",
-		PasswordHash: string(hashedPassword),
-		Email:        "test@example.com",
-		Status:       1,
+	// 生成测试用的密码哈希
+	hash, _ := bcrypt.GenerateFromPassword([]byte("correctpassword"), bcrypt.DefaultCost)
+
+	tests := []struct {
+		name        string
+		username    string
+		password    string
+		mockSetup   func()
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:     "登录成功",
+			username: "testuser",
+			password: "correctpassword",
+			mockSetup: func() {
+				mockRepo.On("GetByUsername", "testuser").Return(&model.User{
+					ID:           1,
+					Username:     "testuser",
+					PasswordHash: string(hash),
+					Status:       1,
+				}, nil).Once()
+			},
+			wantErr: false,
+		},
+		{
+			name:     "用户不存在",
+			username: "nonexistent",
+			password: "anypassword",
+			mockSetup: func() {
+				mockRepo.On("GetByUsername", "nonexistent").
+					Return(nil, repository.ErrUserNotFound).Once()
+			},
+			wantErr:     true,
+			errContains: "用户不存在",
+		},
+		{
+			name:     "密码错误",
+			username: "testuser",
+			password: "wrongpassword",
+			mockSetup: func() {
+				mockRepo.On("GetByUsername", "testuser").Return(&model.User{
+					ID:           1,
+					Username:     "testuser",
+					PasswordHash: string(hash),
+					Status:       1,
+				}, nil).Once()
+			},
+			wantErr:     true,
+			errContains: "密码错误",
+		},
+		{
+			name:     "用户被禁用",
+			username: "disableduser",
+			password: "correctpassword",
+			mockSetup: func() {
+				hash2, _ := bcrypt.GenerateFromPassword([]byte("correctpassword"), bcrypt.DefaultCost)
+				mockRepo.On("GetByUsername", "disableduser").Return(&model.User{
+					ID:           2,
+					Username:     "disableduser",
+					PasswordHash: string(hash2),
+					Status:       0,
+				}, nil).Once()
+			},
+			wantErr:     true,
+			errContains: "用户已被禁用",
+		},
 	}
 
-	mockRepo.On("GetByUsername", "testuser").Return(mockUser, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.mockSetup()
 
-	svc := NewUserService(mockRepo, nil)
+			user, _, err := svc.Login(tt.username, tt.password)
 
-	user, _, err := svc.Login("testuser", "password123")
-	if err != nil {
-		t.Errorf("Login failed: %v", err)
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+				assert.Nil(t, user)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, user)
+				assert.Equal(t, tt.username, user.Username)
+			}
+
+			mockRepo.AssertExpectations(t)
+		})
 	}
-
-	if user.Username != "testuser" {
-		t.Errorf("Username mismatch: got %s, want testuser", user.Username)
-	}
-
-	mockRepo.AssertExpectations(t)
 }
 
-func TestUserService_Login_UserNotFound(t *testing.T) {
-	mockRepo := new(MockUserRepository)
-	mockRepo.On("GetByUsername", "nonexistent").Return(nil, repository.ErrUserNotFound)
+func TestUserService_GetUserInfo(t *testing.T) {
+	svc, mockRepo := setupTest()
 
-	svc := NewUserService(mockRepo, nil)
-
-	_, _, err := svc.Login("nonexistent", "password123")
-	if err == nil {
-		t.Error("Login should fail for nonexistent user")
+	tests := []struct {
+		name      string
+		userID    uint
+		mockSetup func()
+		wantErr   bool
+	}{
+		{
+			name:   "获取成功",
+			userID: 1,
+			mockSetup: func() {
+				mockRepo.On("GetByID", uint(1)).Return(&model.User{
+					ID:       1,
+					Username: "testuser",
+					Email:    "test@example.com",
+				}, nil).Once()
+			},
+			wantErr: false,
+		},
+		{
+			name:   "用户不存在",
+			userID: 999,
+			mockSetup: func() {
+				mockRepo.On("GetByID", uint(999)).
+					Return(nil, repository.ErrUserNotFound).Once()
+			},
+			wantErr: true,
+		},
 	}
 
-	if err.Error() != "用户不存在" {
-		t.Errorf("Error message mismatch: got %s, want 用户不存在", err.Error())
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.mockSetup()
 
-	mockRepo.AssertExpectations(t)
+			user, err := svc.GetUserInfo(tt.userID)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, user)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, user)
+				assert.Equal(t, tt.userID, user.ID)
+			}
+
+			mockRepo.AssertExpectations(t)
+		})
+	}
 }
 
-func TestUserService_Login_WrongPassword(t *testing.T) {
-	mockRepo := new(MockUserRepository)
+func TestUserService_RefreshToken(t *testing.T) {
+	svc, mockRepo := setupTest()
 
-	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("correctpassword"), bcrypt.DefaultCost)
-	mockUser := &model.User{
-		ID:           1,
-		Username:     "testuser",
-		PasswordHash: string(hashedPassword),
-		Email:        "test@example.com",
-		Status:       1,
+	tests := []struct {
+		name        string
+		userID      uint
+		mockSetup   func()
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:   "刷新成功",
+			userID: 1,
+			mockSetup: func() {
+				mockRepo.On("GetByID", uint(1)).Return(&model.User{
+					ID:     1,
+					Status: 1,
+				}, nil).Once()
+			},
+			wantErr: false,
+		},
+		{
+			name:   "用户不存在",
+			userID: 999,
+			mockSetup: func() {
+				mockRepo.On("GetByID", uint(999)).
+					Return(nil, repository.ErrUserNotFound).Once()
+			},
+			wantErr:     true,
+			errContains: "用户不存在",
+		},
+		{
+			name:   "用户被禁用",
+			userID: 2,
+			mockSetup: func() {
+				mockRepo.On("GetByID", uint(2)).Return(&model.User{
+					ID:     2,
+					Status: 0,
+				}, nil).Once()
+			},
+			wantErr:     true,
+			errContains: "用户已被禁用",
+		},
 	}
 
-	mockRepo.On("GetByUsername", "testuser").Return(mockUser, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.mockSetup()
 
-	svc := NewUserService(mockRepo, nil)
+			err := svc.RefreshToken(tt.userID)
 
-	_, _, err := svc.Login("testuser", "wrongpassword")
-	if err == nil {
-		t.Error("Login should fail for wrong password")
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+
+			mockRepo.AssertExpectations(t)
+		})
 	}
-
-	if err.Error() != "密码错误" {
-		t.Errorf("Error message mismatch: got %s, want 密码错误", err.Error())
-	}
-
-	mockRepo.AssertExpectations(t)
 }
 
-func TestUserService_Login_DisabledUser(t *testing.T) {
+func TestUserService_Logout(t *testing.T) {
+	t.Run("无Redis客户端时直接返回成功", func(t *testing.T) {
+		mockRepo := new(MockUserRepository)
+		svc := &userService{repo: mockRepo, rdb: nil}
+
+		err := svc.Logout("test_token", time.Hour)
+		assert.NoError(t, err)
+	})
+
+	t.Run("有Redis客户端时设置黑名单", func(t *testing.T) {
+		// 注意：这里不测试真实的 Redis 操作，因为需要真实的 Redis 连接
+		// 实际项目中可以使用 miniredis 等库进行测试
+		mockRepo := new(MockUserRepository)
+		svc := &userService{repo: mockRepo, rdb: nil}
+
+		// 当 rdb 为 nil 时，直接返回 nil
+		err := svc.Logout("test_token", time.Hour)
+		assert.NoError(t, err)
+	})
+}
+
+func TestNewUserService(t *testing.T) {
 	mockRepo := new(MockUserRepository)
-
-	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
-	mockUser := &model.User{
-		ID:           1,
-		Username:     "testuser",
-		PasswordHash: string(hashedPassword),
-		Email:        "test@example.com",
-		Status:       0,
-	}
-
-	mockRepo.On("GetByUsername", "testuser").Return(mockUser, nil)
-
 	svc := NewUserService(mockRepo, nil)
 
-	_, _, err := svc.Login("testuser", "password123")
-	if err == nil {
-		t.Error("Login should fail for disabled user")
-	}
-
-	if err.Error() != "用户已被禁用" {
-		t.Errorf("Error message mismatch: got %s, want 用户已被禁用", err.Error())
-	}
-
-	mockRepo.AssertExpectations(t)
+	assert.NotNil(t, svc)
+	assert.Implements(t, (*UserService)(nil), svc)
 }

@@ -198,6 +198,109 @@ server {
 
 开发模式下访问：`http://localhost:8080/swagger/index.html`
 
+## CI/CD 配置
+
+本项目使用 GitHub Actions 进行持续集成和部署。
+
+### 工作流说明
+
+| 工作流 | 文件 | 触发条件 | 说明 |
+|--------|------|----------|------|
+| CI Check | `.github/workflows/ci-check.yml` | Push/PR 到 main/develop | 代码质量检查（开箱即用） |
+| Deploy | `.github/workflows/deploy.yml` | Push 到 main 或手动触发 | 构建并部署到服务器（需配置） |
+
+### 快速配置（5分钟完成）
+
+#### 1. 配置 Secrets（敏感信息）
+
+进入仓库 **Settings → Secrets and variables → Actions → Secrets**，添加：
+
+| 名称 | 必填 | 获取方式 |
+|------|------|----------|
+| `SSH_PRIVATE_KEY` | ✅ | 服务器执行 `cat ~/.ssh/id_rsa`，粘贴全文 |
+
+#### 2. 配置 Variables（非敏感配置）
+
+进入 **Settings → Secrets and variables → Actions → Variables**，添加：
+
+| 名称 | 必填 | 示例 | 说明 |
+|------|------|------|------|
+| `DEPLOY_SERVER_HOST` | ✅ | `123.456.78.90` | 服务器公网 IP |
+| `DEPLOY_FRONTEND_PATH` | ✅ | `/www/wwwroot/template-app` | 前端部署目录 |
+| `DEPLOY_BACKEND_PATH` | ✅ | `/www/template-app` | 后端二进制存放目录 |
+| `DEPLOY_SERVER_USER` | ❌ | `root` | SSH 用户名，默认 root |
+| `DEPLOY_SERVER_PORT` | ❌ | `22` | SSH 端口，默认 22 |
+| `DEPLOY_SERVICE_NAME` | ❌ | `template-app` | systemd 服务名 |
+| `PROJECT_FRONTEND_DIR` | ❌ | `./frontend` | 前端代码相对路径 |
+| `PROJECT_BACKEND_DIR` | ❌ | `./backend` | 后端代码相对路径 |
+| `PROJECT_BACKEND_ENTRY` | ❌ | `./cmd/main.go` | Go 主程序入口 |
+| `NODE_VERSION` | ❌ | `20` | Node.js 版本 |
+| `GO_VERSION` | ❌ | `1.22` | Go 版本 |
+| `DEPLOY_NOTIFY_WEBHOOK` | ❌ | `https://oapi.dingtalk.com/...` | 部署成功通知地址 |
+
+#### 3. 服务器准备
+
+```bash
+# 生成 SSH 密钥对（如尚未生成）
+ssh-keygen -t rsa -b 4096 -C "github-actions" -f ~/.ssh/github_actions
+
+# 添加公钥到 authorized_keys
+cat ~/.ssh/github_actions.pub >> ~/.ssh/authorized_keys
+
+# 把私钥填到 GitHub Secrets：SSH_PRIVATE_KEY
+cat ~/.ssh/github_actions
+```
+
+创建 systemd 服务文件 `/etc/systemd/system/template-app.service`：
+
+```ini
+[Unit]
+Description=Template App API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/www/template-app
+ExecStart=/www/template-app/app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启用服务：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable template-app
+```
+
+#### 4. 首次部署
+
+```bash
+git push origin main
+```
+
+然后前往 GitHub → Actions 查看部署状态。
+
+### 使用配置向导脚本
+
+运行本地脚本获取配置指引：
+
+```bash
+bash scripts/setup-ci.sh
+```
+
+### 多环境支持
+
+Deploy 工作流支持通过 `workflow_dispatch` 手动触发，可选择部署环境：
+
+1. 进入 GitHub → Actions → Deploy
+2. 点击 "Run workflow"
+3. 选择环境（production/staging）
+
 ## License
 
 MIT

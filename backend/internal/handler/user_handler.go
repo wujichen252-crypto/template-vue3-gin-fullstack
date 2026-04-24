@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
+
 	"template-vue3-gin-fullstack/backend/config"
 	"template-vue3-gin-fullstack/backend/internal/service"
 	"template-vue3-gin-fullstack/backend/pkg/jwt"
@@ -22,10 +24,14 @@ type UserHandler struct {
 
 func NewUserHandler(svc service.UserService, rdb *redis.Client, cfg *config.Config) *UserHandler {
 	return &UserHandler{
-		svc:    svc,
-		rdb:    rdb,
-		cfg:    cfg,
-		jwtMgr: jwt.NewJWT(cfg.JWT.Secret, config.GetAccessTokenDuration(), config.GetRefreshTokenDuration()),
+		svc: svc,
+		rdb: rdb,
+		cfg: cfg,
+		jwtMgr: jwt.NewJWT(
+			cfg.JWT.Secret,
+			time.Duration(cfg.JWT.AccessExpire)*time.Hour,
+			time.Duration(cfg.JWT.RefreshExpire)*time.Hour,
+		),
 	}
 }
 
@@ -196,7 +202,9 @@ func (h *UserHandler) Logout(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.Logout(token.(string), config.GetAccessTokenDuration()); err != nil {
+	// 从配置获取 token 有效期
+	accessDuration := time.Duration(h.cfg.JWT.AccessExpire) * time.Hour
+	if err := h.svc.Logout(token.(string), accessDuration); err != nil {
 		response.Error(c, http.StatusInternalServerError, "登出失败")
 		return
 	}
