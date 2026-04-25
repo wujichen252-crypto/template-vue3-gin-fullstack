@@ -1,6 +1,6 @@
 module template-vue3-gin-fullstack/backend
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/gin-gonic/gin v1.9.1
@@ -65,6 +65,7 @@ require (
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect

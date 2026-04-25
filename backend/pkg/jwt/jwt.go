@@ -84,6 +84,5 @@ func (j *JWT) IsRefreshToken(tokenString string) bool {
 		return false
 	}
 	expiresAt := claims.ExpiresAt.Time
-	refreshExpiry := time.Now().Add(j.refreshDuration)
-	return expiresAt.After(refreshExpiry.Add(-time.Hour)) && expiresAt.Before(time.Now().Add(j.refreshDuration))
+	return expiresAt.After(time.Now()) && expiresAt.After(time.Now().Add(j.accessDuration))
 }

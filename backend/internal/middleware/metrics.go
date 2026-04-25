@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"database/sql"
 	"strconv"
 	"time"
 
@@ -44,6 +45,48 @@ var (
 		},
 		[]string{"method", "path"},
 	)
+
+	dbOpenConnections = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_open_connections",
+			Help: "当前数据库打开的连接数",
+		},
+	)
+
+	dbInUseConnections = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_in_use_connections",
+			Help: "当前正在使用的数据库连接数",
+		},
+	)
+
+	dbIdleConnections = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_idle_connections",
+			Help: "当前空闲的数据库连接数",
+		},
+	)
+
+	dbWaitCount = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "db_wait_count_total",
+			Help: "等待数据库连接的总次数",
+		},
+	)
+
+	dbWaitDuration = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "db_wait_duration_seconds_total",
+			Help: "等待数据库连接的总时长（秒）",
+		},
+	)
+
+	dbMaxOpenConnections = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "db_max_open_connections",
+			Help: "数据库最大允许打开的连接数",
+		},
+	)
 )
 
 func init() {
@@ -51,6 +94,12 @@ func init() {
 	prometheus.MustRegister(requestTotal)
 	prometheus.MustRegister(requestSize)
 	prometheus.MustRegister(responseSize)
+	prometheus.MustRegister(dbOpenConnections)
+	prometheus.MustRegister(dbInUseConnections)
+	prometheus.MustRegister(dbIdleConnections)
+	prometheus.MustRegister(dbWaitCount)
+	prometheus.MustRegister(dbWaitDuration)
+	prometheus.MustRegister(dbMaxOpenConnections)
 }
 
 func Metrics() gin.HandlerFunc {
@@ -77,4 +126,22 @@ func MetricsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h.ServeHTTP(c.Writer, c.Request)
 	}
+}
+
+// StartDBMetricsCollector 启动数据库连接池指标采集器
+func StartDBMetricsCollector(db *sql.DB, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			stats := db.Stats()
+			dbOpenConnections.Set(float64(stats.OpenConnections))
+			dbInUseConnections.Set(float64(stats.InUse))
+			dbIdleConnections.Set(float64(stats.Idle))
+			dbWaitCount.Add(float64(stats.WaitCount))
+			dbWaitDuration.Add(stats.WaitDuration.Seconds())
+			dbMaxOpenConnections.Set(float64(stats.MaxOpenConnections))
+		}
+	}()
 }

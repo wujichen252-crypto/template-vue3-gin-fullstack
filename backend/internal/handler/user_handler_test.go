@@ -24,20 +24,20 @@ type MockUserService struct {
 	mock.Mock
 }
 
-func (m *MockUserService) Register(username, password, email string) (*model.User, string, error) {
+func (m *MockUserService) Register(username, password, email string) (*model.User, error) {
 	args := m.Called(username, password, email)
 	if args.Get(0) == nil {
-		return nil, args.String(1), args.Error(2)
+		return nil, args.Error(1)
 	}
-	return args.Get(0).(*model.User), args.String(1), args.Error(2)
+	return args.Get(0).(*model.User), args.Error(1)
 }
 
-func (m *MockUserService) Login(username, password string) (*model.User, string, error) {
+func (m *MockUserService) Login(username, password string) (*model.User, error) {
 	args := m.Called(username, password)
 	if args.Get(0) == nil {
-		return nil, args.String(1), args.Error(2)
+		return nil, args.Error(1)
 	}
-	return args.Get(0).(*model.User), args.String(1), args.Error(2)
+	return args.Get(0).(*model.User), args.Error(1)
 }
 
 func (m *MockUserService) GetUserInfo(ctx context.Context, id uint) (*model.User, error) {
@@ -57,8 +57,8 @@ func (m *MockUserService) RefreshToken(userID uint) error {
 	return args.Error(0)
 }
 
-func (m *MockUserService) Logout(token string, exp time.Duration) error {
-	args := m.Called(token, exp)
+func (m *MockUserService) Logout(ctx context.Context, token string, exp time.Duration) error {
+	args := m.Called(ctx, token, exp)
 	return args.Error(0)
 }
 
@@ -99,15 +99,15 @@ func TestUserHandler_Register(t *testing.T) {
 				"email":    "test@example.com",
 			},
 			mockSetup: func() {
-				mockSvc.On("Register", "testuser", "password123", "test@example.com").
-					Return(&model.User{
-						ID:        1,
-						Username:  "testuser",
-						Email:     "test@example.com",
-						AvatarURL: "",
-						Status:    1,
-					}, "", nil).Once()
-			},
+			mockSvc.On("Register", "testuser", "password123", "test@example.com").
+				Return(&model.User{
+					ID:        1,
+					Username:  "testuser",
+					Email:     "test@example.com",
+					AvatarURL: "",
+					Status:    1,
+				}, nil).Once()
+		},
 			wantStatus:   http.StatusOK,
 			wantToken:    true,
 			wantUserInfo: true,
@@ -163,9 +163,9 @@ func TestUserHandler_Register(t *testing.T) {
 				"email":    "existing@example.com",
 			},
 			mockSetup: func() {
-				mockSvc.On("Register", "existinguser", "password123", "existing@example.com").
-					Return(nil, "", errors.New("用户名或邮箱已被注册")).Once()
-			},
+			mockSvc.On("Register", "existinguser", "password123", "existing@example.com").
+				Return(nil, errors.New("用户名或邮箱已被注册")).Once()
+		},
 			wantStatus: http.StatusConflict,
 			wantErrMsg: "用户名或邮箱已被注册",
 		},
@@ -177,9 +177,9 @@ func TestUserHandler_Register(t *testing.T) {
 				"email":    "test@example.com",
 			},
 			mockSetup: func() {
-				mockSvc.On("Register", "testuser", "password123", "test@example.com").
-					Return(nil, "", errors.New("数据库错误")).Once()
-			},
+			mockSvc.On("Register", "testuser", "password123", "test@example.com").
+				Return(nil, errors.New("数据库错误")).Once()
+		},
 			wantStatus: http.StatusInternalServerError,
 			wantErrMsg: "注册失败",
 		},
@@ -246,15 +246,15 @@ func TestUserHandler_Login(t *testing.T) {
 				"password": "password123",
 			},
 			mockSetup: func() {
-				mockSvc.On("Login", "testuser", "password123").
-					Return(&model.User{
-						ID:        1,
-						Username:  "testuser",
-						Email:     "test@example.com",
-						AvatarURL: "",
-						Status:    1,
-					}, "", nil).Once()
-			},
+			mockSvc.On("Login", "testuser", "password123").
+				Return(&model.User{
+					ID:        1,
+					Username:  "testuser",
+					Email:     "test@example.com",
+					AvatarURL: "",
+					Status:    1,
+				}, nil).Once()
+		},
 			wantStatus:       http.StatusOK,
 			wantAccessToken:  true,
 			wantRefreshToken: true,
@@ -284,9 +284,9 @@ func TestUserHandler_Login(t *testing.T) {
 				"password": "wrongpassword",
 			},
 			mockSetup: func() {
-				mockSvc.On("Login", "testuser", "wrongpassword").
-					Return(nil, "", errors.New("用户不存在")).Once()
-			},
+			mockSvc.On("Login", "testuser", "wrongpassword").
+				Return(nil, errors.New("用户不存在")).Once()
+		},
 			wantStatus: http.StatusUnauthorized,
 			wantErrMsg: "登录失败",
 		},
@@ -523,17 +523,17 @@ func TestUserHandler_Logout(t *testing.T) {
 		{
 			name: "登出成功",
 			mockSetup: func() {
-				mockSvc.On("Logout", "test-token-123", mock.AnythingOfType("time.Duration")).
-					Return(nil).Once()
-			},
+			mockSvc.On("Logout", mock.AnythingOfType("context.backgroundCtx"), "test-token-123", mock.AnythingOfType("time.Duration")).
+				Return(nil).Once()
+		},
 			wantStatus: http.StatusOK,
 		},
 		{
 			name: "登出失败",
 			mockSetup: func() {
-				mockSvc.On("Logout", "test-token-123", mock.AnythingOfType("time.Duration")).
-					Return(errors.New("Redis错误")).Once()
-			},
+			mockSvc.On("Logout", mock.AnythingOfType("context.backgroundCtx"), "test-token-123", mock.AnythingOfType("time.Duration")).
+				Return(errors.New("Redis错误")).Once()
+		},
 			wantStatus: http.StatusInternalServerError,
 			wantErrMsg: "登出失败",
 		},

@@ -127,7 +127,7 @@ func TestUserService_Register(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.mockSetup()
 
-			user, _, err := svc.Register(tt.username, tt.password, tt.email)
+			user, err := svc.Register(tt.username, tt.password, tt.email)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -228,7 +228,7 @@ func TestUserService_Login(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.mockSetup()
 
-			user, _, err := svc.Login(tt.username, tt.password)
+			user, err := svc.Login(tt.username, tt.password)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -369,7 +369,7 @@ func TestUserService_Logout(t *testing.T) {
 		mockRepo := new(MockUserRepository)
 		svc := &userService{repo: mockRepo, rdb: nil}
 
-		err := svc.Logout("test_token", time.Hour)
+		err := svc.Logout(context.Background(), "test_token", time.Hour)
 		assert.NoError(t, err)
 	})
 
@@ -380,7 +380,7 @@ func TestUserService_Logout(t *testing.T) {
 		svc := &userService{repo: mockRepo, rdb: nil}
 
 		// 当 rdb 为 nil 时，直接返回 nil
-		err := svc.Logout("test_token", time.Hour)
+		err := svc.Logout(context.Background(), "test_token", time.Hour)
 		assert.NoError(t, err)
 	})
 }

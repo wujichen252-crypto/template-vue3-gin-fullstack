@@ -19,11 +19,11 @@ const (
 )
 
 type UserService interface {
-	Register(username, password, email string) (*model.User, string, error)
-	Login(username, password string) (*model.User, string, error)
+	Register(username, password, email string) (*model.User, error)
+	Login(username, password string) (*model.User, error)
 	GetUserInfo(ctx context.Context, id uint) (*model.User, error)
 	RefreshToken(userID uint) error
-	Logout(token string, exp time.Duration) error
+	Logout(ctx context.Context, token string, exp time.Duration) error
 	ClearUserCache(ctx context.Context, userID uint)
 }
 
@@ -41,10 +41,10 @@ func NewUserService(repo repository.UserRepository, rdb *redis.Client) UserServi
 	}
 }
 
-func (s *userService) Register(username, password, email string) (*model.User, string, error) {
+func (s *userService) Register(username, password, email string) (*model.User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	user := &model.User{
@@ -57,29 +57,29 @@ func (s *userService) Register(username, password, email string) (*model.User, s
 
 	if err := s.repo.Create(user); err != nil {
 		if errors.Is(err, repository.ErrUserAlreadyExists) {
-			return nil, "", errors.New("用户名或邮箱已被注册")
+			return nil, errors.New("用户名或邮箱已被注册")
 		}
-		return nil, "", err
+		return nil, err
 	}
 
-	return user, "", nil
+	return user, nil
 }
 
-func (s *userService) Login(username, password string) (*model.User, string, error) {
+func (s *userService) Login(username, password string) (*model.User, error) {
 	user, err := s.repo.GetByUsername(username)
 	if err != nil {
-		return nil, "", errors.New("用户不存在")
+		return nil, errors.New("用户不存在")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		return nil, "", errors.New("密码错误")
+		return nil, errors.New("密码错误")
 	}
 
 	if user.Status != 1 {
-		return nil, "", errors.New("用户已被禁用")
+		return nil, errors.New("用户已被禁用")
 	}
 
-	return user, "", nil
+	return user, nil
 }
 
 func (s *userService) GetUserInfo(ctx context.Context, id uint) (*model.User, error) {
@@ -110,11 +110,10 @@ func (s *userService) RefreshToken(userID uint) error {
 	return nil
 }
 
-func (s *userService) Logout(token string, exp time.Duration) error {
+func (s *userService) Logout(ctx context.Context, token string, exp time.Duration) error {
 	if s.rdb == nil {
 		return nil
 	}
-	ctx := context.Background()
 	key := fmt.Sprintf("jwt_blacklist:%s", token)
 	return s.rdb.Set(ctx, key, "1", exp).Err()
 }

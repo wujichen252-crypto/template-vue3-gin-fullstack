@@ -123,7 +123,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		cfg.Database.SSLMode,
 	)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		PrepareStmt: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -150,16 +152,25 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	sqlDB.SetMaxIdleConns(maxIdleConns)
 	sqlDB.SetConnMaxLifetime(time.Duration(connMaxLifetime) * time.Second)
 
+	// 启动数据库连接池指标采集
+	middleware.StartDBMetricsCollector(sqlDB, 10*time.Second)
+
 	return db, nil
 }
 
 func initRedis(cfg *config.Config) *redis.Client {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port),
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-		PoolSize:     100,
-		MinIdleConns: 10,
+		Addr:            fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port),
+		Password:        cfg.Redis.Password,
+		DB:              cfg.Redis.DB,
+		PoolSize:        100,
+		MinIdleConns:    10,
+		ReadTimeout:     3 * time.Second,
+		WriteTimeout:    3 * time.Second,
+		PoolTimeout:     4 * time.Second,
+		MaxRetries:      3,
+		MinRetryBackoff: time.Millisecond * 8,
+		MaxRetryBackoff: time.Millisecond * 512,
 	})
 
 	return rdb

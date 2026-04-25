@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 	"template-vue3-gin-fullstack/backend/config"
 	"template-vue3-gin-fullstack/backend/pkg/response"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -15,7 +15,28 @@ import (
 const (
 	defaultLimit = 60
 	authLimit    = 5
+	windowSize   = 60
 )
+
+var slidingWindowScript = redis.NewScript(`
+local key = KEYS[1]
+local limit = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local windowStart = now - window
+
+redis.call('ZREMRANGEBYSCORE', key, 0, windowStart)
+
+local count = redis.call('ZCARD', key)
+
+if count < limit then
+    redis.call('ZADD', key, now, now .. ':' .. math.random(1000000))
+    redis.call('EXPIRE', key, window)
+    return 1
+end
+
+return 0
+`)
 
 func RateLimiter(rdb *redis.Client, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -34,18 +55,15 @@ func RateLimiter(rdb *redis.Client, cfg *config.Config) gin.HandlerFunc {
 		}
 
 		ctx := context.Background()
+		now := time.Now().UnixMilli()
 
-		count, err := rdb.Incr(ctx, key).Result()
+		allowed, err := slidingWindowScript.Run(ctx, rdb, []string{key}, limit, windowSize*1000, now).Int()
 		if err != nil {
 			c.Next()
 			return
 		}
 
-		if count == 1 {
-			rdb.Expire(ctx, key, time.Minute)
-		}
-
-		if int(count) > limit {
+		if allowed == 0 {
 			if isAuthEndpoint(path) {
 				response.Error(c, http.StatusTooManyRequests, "登录请求过于频繁，请稍后再试")
 			} else {

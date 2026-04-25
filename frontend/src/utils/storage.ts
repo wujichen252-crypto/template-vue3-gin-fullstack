@@ -2,16 +2,29 @@ const TOKEN_KEY = 'token'
 
 const storage = {
   get: (key: string): string | null => {
-    return localStorage.getItem(key)
+    try {
+      return localStorage.getItem(key)
+    } catch {
+      return null
+    }
   },
   set: (key: string, value: string): void => {
-    localStorage.setItem(key, value)
+    try {
+      localStorage.setItem(key, value)
+    } catch {
+    }
   },
   remove: (key: string): void => {
-    localStorage.removeItem(key)
+    try {
+      localStorage.removeItem(key)
+    } catch {
+    }
   },
   clear: (): void => {
-    localStorage.clear()
+    try {
+      localStorage.clear()
+    } catch {
+    }
   }
 }
 

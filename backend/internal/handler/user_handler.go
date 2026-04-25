@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -53,7 +52,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
-	user, _, err := h.svc.Register(req.Username, req.Password, req.Email)
+	user, err := h.svc.Register(req.Username, req.Password, req.Email)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "用户名或邮箱已被注册" {
@@ -89,7 +88,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	user, _, err := h.svc.Login(req.Username, req.Password)
+	user, err := h.svc.Login(req.Username, req.Password)
 	if err != nil {
 		response.Error(c, http.StatusUnauthorized, "登录失败")
 		return
@@ -202,38 +201,11 @@ func (h *UserHandler) Logout(c *gin.Context) {
 		return
 	}
 
-	// 从配置获取 token 有效期
 	accessDuration := time.Duration(h.cfg.JWT.AccessExpire) * time.Hour
-	if err := h.svc.Logout(token.(string), accessDuration); err != nil {
+	if err := h.svc.Logout(c.Request.Context(), token.(string), accessDuration); err != nil {
 		response.Error(c, http.StatusInternalServerError, "登出失败")
 		return
 	}
 
 	response.Success(c, gin.H{"message": "登出成功"})
-}
-
-func (h *UserHandler) GetUserIDFromToken(c *gin.Context) (uint, error) {
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		return 0, errors.New("Authorization header is required")
-	}
-
-	tokenString := ""
-	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
-		tokenString = authHeader[7:]
-	} else {
-		tokenString = authHeader
-	}
-
-	claims, err := h.jwtMgr.ParseToken(tokenString)
-	if err != nil {
-		return 0, err
-	}
-
-	userID, err := strconv.ParseUint(claims.Subject, 10, 32)
-	if err != nil {
-		return 0, err
-	}
-
-	return uint(userID), nil
 }

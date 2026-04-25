@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 type Cache struct {
 	client *redis.Client
 	prefix string
+	group  singleflight.Group
 }
 
 func NewCache(client *redis.Client, prefix string) *Cache {
@@ -70,20 +72,26 @@ func (c *Cache) GetOrSet(ctx context.Context, key string, dest interface{}, expi
 		}
 	}
 
-	data, err := fn()
+	result, err, _ := c.group.Do(key, func() (interface{}, error) {
+		data, err := fn()
+		if err != nil {
+			return nil, err
+		}
+
+		if c.client != nil {
+			if setErr := c.Set(ctx, key, data, expiration); setErr != nil {
+				return nil, setErr
+			}
+		}
+
+		return data, nil
+	})
+
 	if err != nil {
 		return err
 	}
 
-	if c.client != nil {
-		if err := c.Set(ctx, key, data, expiration); err != nil {
-			return err
-		}
-		return c.Get(ctx, key, dest)
-	}
-
-	// 如果没有缓存客户端，直接返回数据
-	bytes, err := json.Marshal(data)
+	bytes, err := json.Marshal(result)
 	if err != nil {
 		return err
 	}

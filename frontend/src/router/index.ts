@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
+const authStore = useAuthStore()
+
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
@@ -37,7 +39,6 @@ const router = createRouter({
 })
 
 router.beforeEach((to, _from, next) => {
-  const authStore = useAuthStore()
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
 
   if (requiresAuth && !authStore.isAuthenticated) {

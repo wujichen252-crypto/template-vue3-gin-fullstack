@@ -4,6 +4,8 @@ import storage from './storage'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
 
+const pendingRequests = new Map<string, AbortController>()
+
 const request: AxiosInstance = axios.create({
   baseURL,
   timeout: 30000,
@@ -12,12 +14,22 @@ const request: AxiosInstance = axios.create({
   }
 })
 
+const generateRequestKey = (config: InternalAxiosRequestConfig): string => {
+  return `${config.method}:${config.url}:${JSON.stringify(config.params)}:${JSON.stringify(config.data)}`
+}
+
 request.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = storage.get('token')
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
     }
+
+    const requestKey = generateRequestKey(config)
+    const controller = new AbortController()
+    config.signal = controller.signal
+    pendingRequests.set(requestKey, controller)
+
     return config
   },
   (error: AxiosError) => {
@@ -27,6 +39,9 @@ request.interceptors.request.use(
 
 request.interceptors.response.use(
   (response: AxiosResponse) => {
+    const requestKey = generateRequestKey(response.config as InternalAxiosRequestConfig)
+    pendingRequests.delete(requestKey)
+
     const res = response.data
     if (res.code !== 200) {
       ElMessage.error(res.msg || '请求失败')
@@ -35,6 +50,11 @@ request.interceptors.response.use(
     return res
   },
   (error: AxiosError) => {
+    if (error.config) {
+      const requestKey = generateRequestKey(error.config as InternalAxiosRequestConfig)
+      pendingRequests.delete(requestKey)
+    }
+
     if (error.response) {
       const status = error.response.status
       if (status === 401) {
@@ -50,5 +70,19 @@ request.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+export const cancelPendingRequest = (config: InternalAxiosRequestConfig): void => {
+  const requestKey = generateRequestKey(config)
+  const controller = pendingRequests.get(requestKey)
+  if (controller) {
+    controller.abort()
+    pendingRequests.delete(requestKey)
+  }
+}
+
+export const cancelAllPendingRequests = (): void => {
+  pendingRequests.forEach(controller => controller.abort())
+  pendingRequests.clear()
+}
 
 export default request

@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => ({
       resolvers: [ElementPlusResolver()],
       dts: 'src/components.d.ts'
     }),
-    viteImagemin({
+    mode === 'production' && viteImagemin({
       gifsicle: {
         optimizationLevel: 7,
         interlaced: false
@@ -72,6 +72,7 @@ export default defineConfig(({ mode }) => ({
     cssCodeSplit: true,
     chunkSizeWarningLimit: 500,
     sourcemap: false,
+    minify: mode === 'production' ? 'terser' : 'esbuild',
     rollupOptions: {
       output: {
         manualChunks: {
@@ -92,16 +93,17 @@ export default defineConfig(({ mode }) => ({
         }
       }
     },
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-        pure_funcs: ['console.log', 'console.info']
-      },
-      mangle: {
-        safari10: true
+    ...(mode === 'production' && {
+      terserOptions: {
+        compress: {
+          drop_console: true,
+          drop_debugger: true,
+          pure_funcs: ['console.log', 'console.info']
+        },
+        mangle: {
+          safari10: true
+        }
       }
-    },
-    minify: 'terser'
+    })
   }
 }))

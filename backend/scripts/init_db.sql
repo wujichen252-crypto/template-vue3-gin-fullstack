@@ -10,19 +10,17 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL,
-    username VARCHAR(64) NOT NULL UNIQUE,
+    username VARCHAR(64) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    email VARCHAR(128) NOT NULL UNIQUE,
+    email VARCHAR(128) NOT NULL,
     avatar_url VARCHAR(255) DEFAULT '',
-    status SMALLINT DEFAULT 1,
-    CONSTRAINT users_username_key UNIQUE (username),
-    CONSTRAINT users_email_key UNIQUE (email)
+    status SMALLINT DEFAULT 1
 );
 
--- 创建索引
+-- 创建唯一约束和索引
+ALTER TABLE users ADD CONSTRAINT users_username_key UNIQUE (username);
+ALTER TABLE users ADD CONSTRAINT users_email_key UNIQUE (email);
 CREATE INDEX idx_users_deleted_at ON users(deleted_at);
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_users_email ON users(email);
 
 -- 注释
 COMMENT ON TABLE users IS '用户表';

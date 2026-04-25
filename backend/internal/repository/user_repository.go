@@ -2,7 +2,6 @@ package repository
 
 import (
 	"errors"
-	"strings"
 	"template-vue3-gin-fullstack/backend/internal/model"
 
 	"gorm.io/gorm"
@@ -47,12 +46,31 @@ func isDuplicateKeyError(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	return strings.Contains(errStr, "duplicate key") || strings.Contains(errStr, "UNIQUE constraint")
+	return containsAny(errStr, []string{
+		"duplicate key",
+		"UNIQUE constraint",
+		"unique_violation",
+		"23505",
+	})
+}
+
+func containsAny(s string, substrs []string) bool {
+	for _, substr := range substrs {
+		if len(s) >= len(substr) {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (r *userRepository) GetByID(id uint) (*model.User, error) {
 	var user model.User
-	if err := r.db.First(&user, id).Error; err != nil {
+	if err := r.db.Select("id, username, email, avatar_url, status, created_at, updated_at").
+		First(&user, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
 		}
@@ -63,7 +81,7 @@ func (r *userRepository) GetByID(id uint) (*model.User, error) {
 
 func (r *userRepository) GetByUsername(username string) (*model.User, error) {
 	var user model.User
-	if err := r.db.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := r.db.Select("id", "username", "email", "password_hash", "avatar_url", "status", "created_at", "updated_at", "deleted_at").Where("username = ?", username).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
 		}
@@ -74,7 +92,7 @@ func (r *userRepository) GetByUsername(username string) (*model.User, error) {
 
 func (r *userRepository) GetByEmail(email string) (*model.User, error) {
 	var user model.User
-	if err := r.db.Where("email = ?", email).First(&user).Error; err != nil {
+	if err := r.db.Select("id", "username", "email", "avatar_url", "status", "created_at", "updated_at", "deleted_at").Where("email = ?", email).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
 		}
@@ -84,7 +102,7 @@ func (r *userRepository) GetByEmail(email string) (*model.User, error) {
 }
 
 func (r *userRepository) Update(user *model.User) error {
-	return r.db.Save(user).Error
+	return r.db.Model(&model.User{}).Where("id = ?", user.ID).Updates(user).Error
 }
 
 func (r *userRepository) Delete(id uint) error {
@@ -100,7 +118,7 @@ func (r *userRepository) List(page, pageSize int) ([]*model.User, int64, error) 
 	}
 
 	offset := (page - 1) * pageSize
-	if err := r.db.Offset(offset).Limit(pageSize).Find(&users).Error; err != nil {
+	if err := r.db.Select("id", "username", "email", "avatar_url", "status", "created_at", "updated_at").Offset(offset).Limit(pageSize).Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"template-vue3-gin-fullstack/backend/config"
 	"template-vue3-gin-fullstack/backend/pkg/jwt"
 	"template-vue3-gin-fullstack/backend/pkg/response"
@@ -15,8 +16,58 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// tokenBlacklist 本地缓存，减少 Redis 查询频率
+type tokenBlacklist struct {
+	tokens map[string]time.Time
+	mu     sync.RWMutex
+}
+
+func newTokenBlacklist() *tokenBlacklist {
+	tb := &tokenBlacklist{
+		tokens: make(map[string]time.Time),
+	}
+	// 定期清理过期条目
+	go tb.cleanup()
+	return tb
+}
+
+func (tb *tokenBlacklist) Add(token string, exp time.Duration) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	tb.tokens[token] = time.Now().Add(exp)
+}
+
+func (tb *tokenBlacklist) IsBlacklisted(token string) bool {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+	exp, exists := tb.tokens[token]
+	if !exists {
+		return false
+	}
+	return time.Now().Before(exp)
+}
+
+func (tb *tokenBlacklist) cleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		tb.mu.Lock()
+		now := time.Now()
+		for token, exp := range tb.tokens {
+			if now.After(exp) {
+				delete(tb.tokens, token)
+			}
+		}
+		tb.mu.Unlock()
+	}
+}
+
+var globalBlacklist = newTokenBlacklist()
+
 func JWT(secret string, rdb *redis.Client) gin.HandlerFunc {
 	jwtMgr := jwt.NewJWT(secret, config.GetAccessTokenDuration(), config.GetRefreshTokenDuration())
+
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -34,13 +85,23 @@ func JWT(secret string, rdb *redis.Client) gin.HandlerFunc {
 
 		tokenString := parts[1]
 
-		ctx := context.Background()
-		blacklistKey := fmt.Sprintf("jwt_blacklist:%s", tokenString)
-		exists, _ := rdb.Exists(ctx, blacklistKey).Result()
-		if exists > 0 {
+		// 先检查本地缓存，减少 Redis 查询
+		if globalBlacklist.IsBlacklisted(tokenString) {
 			response.Error(c, http.StatusUnauthorized, "未授权：Token已失效")
 			c.Abort()
 			return
+		}
+
+		// 本地缓存未命中时，检查 Redis
+		if rdb != nil {
+			ctx := context.Background()
+			blacklistKey := fmt.Sprintf("jwt_blacklist:%s", tokenString)
+			exists, _ := rdb.Exists(ctx, blacklistKey).Result()
+			if exists > 0 {
+				response.Error(c, http.StatusUnauthorized, "未授权：Token已失效")
+				c.Abort()
+				return
+			}
 		}
 
 		claims, err := jwtMgr.ParseToken(tokenString)
@@ -64,7 +125,13 @@ func JWT(secret string, rdb *redis.Client) gin.HandlerFunc {
 }
 
 func BlacklistToken(rdb *redis.Client, token string, exp time.Duration) error {
-	ctx := context.Background()
-	key := fmt.Sprintf("jwt_blacklist:%s", token)
-	return rdb.Set(ctx, key, "1", exp).Err()
+	// 同时更新本地缓存和 Redis
+	globalBlacklist.Add(token, exp)
+
+	if rdb != nil {
+		ctx := context.Background()
+		key := fmt.Sprintf("jwt_blacklist:%s", token)
+		return rdb.Set(ctx, key, "1", exp).Err()
+	}
+	return nil
 }
