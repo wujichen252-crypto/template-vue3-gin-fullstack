@@ -7,26 +7,38 @@ import (
 	"time"
 	"template-vue3-gin-fullstack/backend/internal/model"
 	"template-vue3-gin-fullstack/backend/internal/repository"
+	"template-vue3-gin-fullstack/backend/pkg/cache"
 
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 )
 
+const (
+	userCachePrefix = "user"
+	userCacheTTL    = 5 * time.Minute
+)
+
 type UserService interface {
 	Register(username, password, email string) (*model.User, string, error)
 	Login(username, password string) (*model.User, string, error)
-	GetUserInfo(id uint) (*model.User, error)
+	GetUserInfo(ctx context.Context, id uint) (*model.User, error)
 	RefreshToken(userID uint) error
 	Logout(token string, exp time.Duration) error
+	ClearUserCache(ctx context.Context, userID uint)
 }
 
 type userService struct {
-	repo repository.UserRepository
-	rdb  *redis.Client
+	repo  repository.UserRepository
+	rdb   *redis.Client
+	cache *cache.Cache
 }
 
 func NewUserService(repo repository.UserRepository, rdb *redis.Client) UserService {
-	return &userService{repo: repo, rdb: rdb}
+	return &userService{
+		repo:  repo,
+		rdb:   rdb,
+		cache: cache.NewCache(rdb, userCachePrefix),
+	}
 }
 
 func (s *userService) Register(username, password, email string) (*model.User, string, error) {
@@ -70,8 +82,19 @@ func (s *userService) Login(username, password string) (*model.User, string, err
 	return user, "", nil
 }
 
-func (s *userService) GetUserInfo(id uint) (*model.User, error) {
-	return s.repo.GetByID(id)
+func (s *userService) GetUserInfo(ctx context.Context, id uint) (*model.User, error) {
+	cacheKey := fmt.Sprintf("info:%d", id)
+
+	var user model.User
+	err := s.cache.GetOrSet(ctx, cacheKey, &user, userCacheTTL, func() (interface{}, error) {
+		return s.repo.GetByID(id)
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
 }
 
 func (s *userService) RefreshToken(userID uint) error {
@@ -94,4 +117,12 @@ func (s *userService) Logout(token string, exp time.Duration) error {
 	ctx := context.Background()
 	key := fmt.Sprintf("jwt_blacklist:%s", token)
 	return s.rdb.Set(ctx, key, "1", exp).Err()
+}
+
+func (s *userService) ClearUserCache(ctx context.Context, userID uint) {
+	if s.cache == nil {
+		return
+	}
+	cacheKey := fmt.Sprintf("info:%d", userID)
+	s.cache.Delete(ctx, cacheKey)
 }

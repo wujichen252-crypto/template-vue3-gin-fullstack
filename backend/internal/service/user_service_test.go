@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -69,7 +70,7 @@ func (m *MockUserRepository) List(page, pageSize int) ([]*model.User, int64, err
 func setupTest() (*userService, *MockUserRepository) {
 	mockRepo := new(MockUserRepository)
 	// 使用 nil redis 客户端，测试不依赖缓存的功能
-	svc := &userService{repo: mockRepo, rdb: nil}
+	svc := NewUserService(mockRepo, nil).(*userService)
 	return svc, mockRepo
 }
 
@@ -282,7 +283,7 @@ func TestUserService_GetUserInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.mockSetup()
 
-			user, err := svc.GetUserInfo(tt.userID)
+			user, err := svc.GetUserInfo(context.Background(), tt.userID)
 
 			if tt.wantErr {
 				assert.Error(t, err)

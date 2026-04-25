@@ -46,6 +46,7 @@ func main() {
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
 
+	r.Use(middleware.Metrics())
 	r.Use(middleware.Logger(logCore))
 	r.Use(middleware.Recovery(logCore, false))
 	r.Use(middleware.CORS(cfg.Server.AllowOrigins))
@@ -54,6 +55,8 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "time": time.Now().Format("2006-01-02 15:04:05")})
 	})
+
+	r.GET("/metrics", middleware.MetricsHandler())
 
 	r.Static("/swagger", "./swagger")
 	api := r.Group("/api/v1")
@@ -69,7 +72,13 @@ func main() {
 	}
 
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
-	srv := &http.Server{Addr: addr, Handler: r}
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      r,
+		ReadTimeout:  time.Duration(cfg.Server.Timeout.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(cfg.Server.Timeout.WriteTimeout) * time.Second,
+		IdleTimeout:  time.Duration(cfg.Server.Timeout.IdleTimeout) * time.Second,
+	}
 
 	go func() {
 		log.Printf("服务器启动于 http://localhost:%s", cfg.Server.Port)
@@ -124,9 +133,22 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	maxOpenConns := cfg.Database.MaxOpenConns
+	if maxOpenConns <= 0 {
+		maxOpenConns = 100
+	}
+	maxIdleConns := cfg.Database.MaxIdleConns
+	if maxIdleConns <= 0 {
+		maxIdleConns = 10
+	}
+	connMaxLifetime := cfg.Database.ConnMaxLifetime
+	if connMaxLifetime <= 0 {
+		connMaxLifetime = 3600
+	}
+
+	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetMaxIdleConns(maxIdleConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(connMaxLifetime) * time.Second)
 
 	return db, nil
 }

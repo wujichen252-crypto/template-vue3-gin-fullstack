@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -39,12 +40,16 @@ func (m *MockUserService) Login(username, password string) (*model.User, string,
 	return args.Get(0).(*model.User), args.String(1), args.Error(2)
 }
 
-func (m *MockUserService) GetUserInfo(id uint) (*model.User, error) {
-	args := m.Called(id)
+func (m *MockUserService) GetUserInfo(ctx context.Context, id uint) (*model.User, error) {
+	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*model.User), args.Error(1)
+}
+
+func (m *MockUserService) ClearUserCache(ctx context.Context, userID uint) {
+	m.Called(ctx, userID)
 }
 
 func (m *MockUserService) RefreshToken(userID uint) error {
@@ -341,7 +346,7 @@ func TestUserHandler_GetUserInfo(t *testing.T) {
 		{
 			name: "获取成功",
 			mockSetup: func() {
-				mockSvc.On("GetUserInfo", uint(1)).Return(&model.User{
+				mockSvc.On("GetUserInfo", mock.Anything, uint(1)).Return(&model.User{
 					ID:        1,
 					Username:  "testuser",
 					Email:     "test@example.com",
@@ -355,7 +360,7 @@ func TestUserHandler_GetUserInfo(t *testing.T) {
 		{
 			name: "用户不存在",
 			mockSetup: func() {
-				mockSvc.On("GetUserInfo", uint(1)).
+				mockSvc.On("GetUserInfo", mock.Anything, uint(1)).
 					Return(nil, errors.New("用户不存在")).Once()
 			},
 			wantStatus: http.StatusNotFound,

@@ -19,15 +19,25 @@ type ServerConfig struct {
 	Port         string
 	Mode         string
 	AllowOrigins []string
+	Timeout      ServerTimeoutConfig
 }
 
 type DatabaseConfig struct {
-	Host     string
-	Port     string
-	User     string
-	Password string
-	Name     string
-	SSLMode  string
+	Host            string
+	Port            string
+	User            string
+	Password        string
+	Name            string
+	SSLMode         string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime int
+}
+
+type ServerTimeoutConfig struct {
+	ReadTimeout  int
+	WriteTimeout int
+	IdleTimeout  int
 }
 
 type RedisConfig struct {
@@ -66,14 +76,22 @@ func InitConfig() error {
 			Port:         viper.GetString("SERVER_PORT"),
 			Mode:         viper.GetString("SERVER_MODE"),
 			AllowOrigins: viper.GetStringSlice("ALLOW_ORIGINS"),
+			Timeout: ServerTimeoutConfig{
+				ReadTimeout:  viper.GetInt("SERVER_READ_TIMEOUT"),
+				WriteTimeout: viper.GetInt("SERVER_WRITE_TIMEOUT"),
+				IdleTimeout:  viper.GetInt("SERVER_IDLE_TIMEOUT"),
+			},
 		},
 		Database: DatabaseConfig{
-			Host:     viper.GetString("DB_HOST"),
-			Port:     viper.GetString("DB_PORT"),
-			User:     viper.GetString("DB_USER"),
-			Password: viper.GetString("DB_PASSWORD"),
-			Name:     viper.GetString("DB_NAME"),
-			SSLMode:  viper.GetString("DB_SSLMODE"),
+			Host:            viper.GetString("DB_HOST"),
+			Port:            viper.GetString("DB_PORT"),
+			User:            viper.GetString("DB_USER"),
+			Password:        viper.GetString("DB_PASSWORD"),
+			Name:            viper.GetString("DB_NAME"),
+			SSLMode:         viper.GetString("DB_SSLMODE"),
+			MaxOpenConns:    viper.GetInt("DB_MAX_OPEN_CONNS"),
+			MaxIdleConns:    viper.GetInt("DB_MAX_IDLE_CONNS"),
+			ConnMaxLifetime: viper.GetInt("DB_CONN_MAX_LIFETIME"),
 		},
 		Redis: RedisConfig{
 			Host:     viper.GetString("REDIS_HOST"),

@@ -13,6 +13,7 @@ module.exports = {
   parserOptions: {
     ecmaVersion: 'latest'
   },
+  ignorePatterns: ['src/auto-imports.d.ts', 'src/components.d.ts'],
   rules: {
     'vue/multi-word-component-names': 'off',
     '@typescript-eslint/no-explicit-any': 'error',

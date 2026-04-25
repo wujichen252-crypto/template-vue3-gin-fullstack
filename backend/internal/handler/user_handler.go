@@ -127,7 +127,7 @@ func (h *UserHandler) GetUserInfo(c *gin.Context) {
 		return
 	}
 
-	user, err := h.svc.GetUserInfo(userID)
+	user, err := h.svc.GetUserInfo(c.Request.Context(), userID)
 	if err != nil {
 		response.Error(c, http.StatusNotFound, "用户不存在")
 		return

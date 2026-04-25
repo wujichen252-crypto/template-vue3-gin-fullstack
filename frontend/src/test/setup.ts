@@ -18,7 +18,7 @@ global.localStorage = {
   setItem: vi.fn(),
   removeItem: vi.fn(),
   clear: vi.fn()
-} as any
+} as unknown as Storage
 
 global.window = {
   location: {
@@ -28,4 +28,4 @@ global.window = {
   navigator: {
     userAgent: 'test'
   }
-} as any
+} as unknown as Window & typeof globalThis
